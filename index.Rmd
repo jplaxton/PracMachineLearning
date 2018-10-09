@@ -1,0 +1,143 @@
+---
+title: "Practical Machine Learning Project"
+author: "John Plaxton"
+date: "October 8, 2018"
+output:
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(rattle)
+```
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Three machine learning models are evaluated for out of sample accuracy to select one to use to predict the exercise (classe) of 20 test cases.
+
+```{r input_data}
+# Input data sets for model building and prediction
+set.seed(123)
+TrainDataset <- read.csv("pml-training.csv")
+TestDataset <- read.csv("pml-testing.csv")
+```
+Train dataset is `r dim(TrainDataset)` observations and columns
+
+Test dataset is `r dim(TestDataset)` observations and columns.  This dataset is the 20 test cases that the selected machine learning model will be used on to predict exercise (classe).
+
+## Cleaning Data Sets
+
+The training data set consists of 19622 observations of 160 columns of data. A quick inspection of the training data set shows many columns have NA values (see Appendix for output).  Columns with a large number of NAs or blanks are removed from the dataset as they will not provide value as predictors in the machine learning models.  Similarly, the first seven columns provide information and timestamps about the test subjects.  Again, these columns are removed as they will not be predictors of exercise type.
+```{r clean_train_set}
+# Identify columns where more than 90% of entries are NA or blank
+indColToRemove <- which(colSums(is.na(TrainDataset) |TrainDataset=="")>0.9*dim(TrainDataset)[1]) 
+TrainDatasetClean <- TrainDataset[,-indColToRemove]
+
+# Remove first seven columns
+TrainDatasetClean <- TrainDatasetClean[,-c(1:7)]
+dim(TrainDatasetClean)
+```
+After cleaning, 53 columns of data remains in the training dataset
+```{r clean_test_set}
+# Applying the same data cleaning procedure to the test set
+indColToRemove <- which(colSums(is.na(TestDataset) |TestDataset=="")>0.9*dim(TestDataset)[1]) 
+TestDatasetClean <- TestDataset[,-indColToRemove]
+TestDatasetClean <- TestDatasetClean[,-c(1:7)]
+dim(TestDatasetClean)
+```
+Similarly, after cleaning, 53 columns of data remain in the test dataset.
+
+Preparing the training dataset for machine learning study...
+```{r partition_data}
+#Partitioning the TrainDatasetClean for model creation
+inTrain <- createDataPartition(y=TrainDatasetClean$classe, p=0.75, list=FALSE)
+training <- TrainDatasetClean[inTrain,]
+testing <- TrainDatasetClean[-inTrain,]
+```
+
+## Machine Learning Model Selection
+
+In this section, three machine learning models will be considered:  
+
+* classification tree 
+* random forest 
+* gradient boosting method
+
+In order to limit overfitting and improve model efficiency, 5-fold cross-validation will be applied.
+```{r cross_validation}
+#configure parallel processing
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+# 5-fold cross-validation specified for all ML models, and enable parallel processing
+trControl <- trainControl(method="cv", number=5, allowParallel = TRUE)
+```
+
+### Classification Tree
+```{r CL}
+model_CT <- train(classe~., data=training, method="rpart", trControl=trControl)
+
+print(model_CT)
+fancyRpartPlot(model_CT$finalModel)
+
+trainpred <- predict(model_CT,newdata=testing)
+
+confMatCT <- confusionMatrix(testing$classe,trainpred)
+
+# display confusion matrix and model accuracy
+confMatCT$table
+confMatCT$overall[1]
+```
+Out of sample accuracy of 48.8% is achieved for the classification tree model.
+
+### Random Forest
+```{r RF}
+model_RF <- train(classe~., data=training, method="rf", trControl=trControl, verbose=FALSE)
+print(model_RF)
+plot(model_RF,main="Accuracy of Random forest model by number of predictors")
+trainpred <- predict(model_RF,newdata=testing)
+
+confMatRF <- confusionMatrix(testing$classe,trainpred)
+
+# display confusion matrix and model accuracy
+confMatRF$table
+confMatRF$overall[1]
+```
+With random forest, out of sample accuracy of 99.3% is achieved.
+
+### Gradient Boosting
+```{r GBM}
+model_GBM <- train(classe~., data=training, method="gbm", trControl=trControl, verbose=FALSE)
+print(model_GBM)
+plot(model_GBM)
+trainpred <- predict(model_GBM,newdata=testing)
+
+confMatGBM <- confusionMatrix(testing$classe,trainpred)
+
+# display confusion matrix and model accuracy
+confMatGBM$table
+confMatGBM$overall[1]
+```
+Out of sample accuracy of 96.0% is achieved with the Gradient Boosting method.
+
+##Conclusion
+Based upon 99.3% out of sample accuracy, Random Forest model will be used to predict the exercises of the test dataset.
+
+```{r predictions}
+FinalTestPred <- predict(model_RF,newdata=TestDatasetClean)
+FinalTestPred
+```
+
+```{r shut_down_parllel_processing}
+#return R to single threaded processing
+stopCluster(cluster)
+registerDoSEQ()
+```
+##Appendix
+Summary of the TrainDataset:
+```{r appendix}
+str(TrainDataset)
+```
